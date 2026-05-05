@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --netflix-red: #E50914;
+            --netflix-dark: #141414;
+            --muted-gray: #B3B3B3;
+            --border-gray: #333333;
+        }
+
+        body {
+            background-color: var(--netflix-dark);
+            color: #FFFFFF;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+            margin: 0;
+            overflow-x: hidden;
+        }
+
+        .header-section {
+            width: 100%;
+            max-width: 1200px;
+            margin-bottom: 20px;
+        }
+
+        .chart-title {
+            font-size: 24px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            border-left: 5px solid var(--netflix-red);
+            padding-left: 15px;
+            margin-bottom: 5px;
+        }
+
+        .chart-subtitle {
+            font-size: 13px;
+            color: var(--muted-gray);
+            margin-bottom: 30px;
+        }
+
+        /* 小倍數圖表的網格容器 */
+        #facets-container {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 15px;
+            width: 100%;
+            max-width: 1200px;
+            overflow-x: auto;
+            /* 類別太多時允許橫向捲動 */
+            padding-bottom: 20px;
+        }
+
+        /* 自訂捲軸樣式 (讓橫向滑動更美觀) */
+        #facets-container::-webkit-scrollbar {
+            height: 8px;
+        }
+
+        #facets-container::-webkit-scrollbar-track {
+            background: #111;
+            border-radius: 4px;
+        }
+
+        #facets-container::-webkit-scrollbar-thumb {
+            background: var(--border-gray);
+            border-radius: 4px;
+        }
+
+        #facets-container::-webkit-scrollbar-thumb:hover {
+            background: var(--muted-gray);
+        }
+
+        .facet {
+            flex: 1;
+            min-width: 130px;
+            background-color: #111;
+            border-top: 2px solid var(--border-gray);
+            padding-top: 10px;
+            position: relative;
+        }
+
+        .facet-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #FFF;
+            text-align: center;
+            margin-bottom: 15px;
+            text-transform: capitalize;
+            letter-spacing: 1px;
+        }
+
+        /* 坐標軸 */
+        .axis path,
+        .axis line {
+            stroke: var(--border-gray);
+        }
+
+        .axis text {
+            fill: var(--muted-gray);
+            font-size: 10px;
+        }
+
+        /* 隱藏除了第一個圖表以外的 Y 軸文字，讓畫面更乾淨 */
+        .hide-y-text .tick text {
+            display: none;
+        }
+
+        .bar {
+            fill: var(--netflix-red);
+            transition: opacity 0.2s;
+            cursor: pointer;
+        }
+
+        .bar:hover {
+            opacity: 0.7;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.95);
+            border: 1px solid var(--border-gray);
+            padding: 12px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            color: white;
+            z-index: 1000;
+            font-size: 13px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+            min-width: 150px;
+        }
+
+        .tt-genre {
+            font-size: 11px;
+            color: var(--muted-gray);
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .tt-main {
+            font-weight: bold;
+            font-size: 15px;
+            margin-bottom: 5px;
+            color: var(--netflix-red);
+        }
+
+        .tt-detail {
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header-section">
+        <div class="chart-title">Market Share by Genre & Country</div>
+        <div class="chart-subtitle">Percentage of total production per genre (Distinct IDs with valid IMDb scores)</div>
+    </div>
+
+    <div id="facets-container"></div>
+    <div id="tooltip" class="tooltip"></div>
+
+    <script>
+        // 設定參數：顯示前幾大國家 (保留國家數量限制，避免 Y 軸過長)
+        const TOP_N_COUNTRIES = 12;
+
+        d3.csv("netflix_cleaned_categorized 2.csv").then(rawData => {
+
+            // 1. 資料清洗與去重 (Distinct ID + Valid Score)
+            const uniqueMap = new Map();
+            rawData.forEach(d => {
+                const score = +d.imdb_score;
+                const country = d.country_clean;
+                const genre = d.genre_clean;
+
+                if (country && genre && !isNaN(score) && score > 0) {
+                    const key = `${d.id}_${genre}`;
+                    if (!uniqueMap.has(key)) {
+                        uniqueMap.set(key, { id: d.id, country, genre });
+                    }
+                }
+            });
+            const cleanedData = Array.from(uniqueMap.values());
+
+            // 2. 找出產量最大的前 N 個國家 (做為 Y 軸)
+            const countryRollup = d3.rollup(cleanedData, v => v.length, d => d.country);
+            const topCountries = Array.from(countryRollup)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, TOP_N_COUNTRIES)
+                .map(d => d[0]);
+
+            // 3. 找出【所有】影片類別 (做為橫向的 Facets)，並依數量由大到小排序
+            const genreRollup = d3.rollup(cleanedData, v => v.length, d => d.genre);
+            const topGenres = Array.from(genreRollup)
+                .sort((a, b) => b[1] - a[1])
+                .map(d => d[0]); // 移除了 .slice()，保留所有分類
+
+            // 過濾只保留 Top 國家的資料 (類別則全保留)
+            const filteredData = cleanedData.filter(d =>
+                topCountries.includes(d.country) && topGenres.includes(d.genre)
+            );
+
+            // 4. 計算每個類別的總數，做為計算市佔率分母
+            const genreTotals = d3.rollup(filteredData, v => v.length, d => d.genre);
+
+            // 5. 計算每個國家在各類別的市佔率 (Market Share)
+            const shareData = [];
+            topGenres.forEach(genre => {
+                const totalInGenre = genreTotals.get(genre) || 1;
+                topCountries.forEach(country => {
+                    const count = filteredData.filter(d => d.country === country && d.genre === genre).length;
+                    shareData.push({
+                        genre: genre,
+                        country: country,
+                        count: count,
+                        total: totalInGenre,
+                        share: count / totalInGenre
+                    });
+                });
+            });
+
+            // 6. 設定圖表共用參數
+            const margin = { top: 10, right: 10, bottom: 30, left: 40 };
+            const width = 150 - margin.left - margin.right;
+            const height = 400 - margin.top - margin.bottom;
+
+            const y = d3.scaleBand()
+                .domain(topCountries)
+                .range([0, height])
+                .padding(0.2);
+
+            const x = d3.scaleLinear()
+                .domain([0, 1])
+                .range([0, width]);
+
+            const tooltip = d3.select("#tooltip");
+
+            // 7. 繪製小倍數圖表 (Small Multiples)
+            const container = d3.select("#facets-container");
+
+            topGenres.forEach((genre, i) => {
+                const genreData = shareData.filter(d => d.genre === genre);
+
+                const facet = container.append("div").attr("class", "facet");
+                facet.append("div").attr("class", "facet-title").text(genre);
+
+                const svg = facet.append("svg")
+                    .attr("width", width + margin.left + margin.right)
+                    .attr("height", height + margin.top + margin.bottom)
+                    .append("g")
+                    .attr("transform", `translate(${i === 0 ? margin.left : 10},${margin.top})`);
+
+                // 繪製 X 軸 (百分比)
+                const xAxis = d3.axisBottom(x).ticks(2).tickFormat(d3.format(".0%"));
+                svg.append("g")
+                    .attr("class", "axis")
+                    .attr("transform", `translate(0,${height})`)
+                    .call(xAxis);
+
+                // 繪製 Y 軸 (國家名稱) - 只在第一個圖表顯示文字
+                const yAxis = d3.axisLeft(y).tickSize(0);
+                const yAxisGroup = svg.append("g")
+                    .attr("class", "axis")
+                    .call(yAxis);
+
+                if (i > 0) {
+                    yAxisGroup.classed("hide-y-text", true);
+                }
+
+                // 繪製長條圖
+                svg.selectAll(".bar")
+                    .data(genreData)
+                    .enter()
+                    .append("rect")
+                    .attr("class", "bar")
+                    .attr("y", d => y(d.country))
+                    .attr("height", y.bandwidth())
+                    .attr("x", 0)
+                    .attr("width", 0)
+                    .transition()
+                    .duration(1000)
+                    .attr("width", d => x(d.share));
+
+                // 加上 Hover 互動
+                svg.selectAll(".bar-interactive")
+                    .data(genreData)
+                    .enter()
+                    .append("rect")
+                    .attr("y", d => y(d.country))
+                    .attr("height", y.bandwidth())
+                    .attr("x", 0)
+                    .attr("width", width)
+                    .attr("fill", "transparent")
+                    .style("cursor", "pointer")
+                    .on("mouseover", function (event, d) {
+                        tooltip.style("display", "block")
+                            .html(`
+                        <div class="tt-genre">${d.genre}</div>
+                        <div class="tt-main">${d.country}: ${(d.share * 100).toFixed(1)}%</div>
+                        <div class="tt-detail">Titles: ${d.count} / ${d.total}</div>
+                    `)
+                            .style("left", (event.pageX + 15) + "px")
+                            .style("top", (event.pageY - 20) + "px");
+                    })
+                    .on("mouseout", function () {
+                        tooltip.style("display", "none");
+                    });
+            });
+        });
+    </script>
+
+</body>
+
+</html>
