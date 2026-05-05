@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --netflix-red: #E50914;
+            --netflix-dark: #141414;
+            --muted-gray: #B3B3B3;
+            --border-gray: #333333;
+        }
+
+        body {
+            background-color: var(--netflix-dark);
+            color: #FFFFFF;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+
+        #year-header {
+            position: sticky;
+            top: 0;
+            background: var(--netflix-dark);
+            width: 100%;
+            text-align: center;
+            z-index: 1000;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-gray);
+        }
+
+        #year-display {
+            font-size: 80px;
+            font-weight: 900;
+            color: var(--netflix-red);
+            letter-spacing: -4px;
+            line-height: 1;
+        }
+
+        #charts-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            width: 100%;
+            max-width: 1200px;
+            margin-top: 20px;
+        }
+
+        .chart-cell {
+            background: #111;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid var(--border-gray);
+            position: relative;
+            cursor: ew-resize;
+        }
+
+        .country-label {
+            font-size: 16px;
+            font-weight: 900;
+            color: #FFF;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            border-left: 3px solid var(--netflix-red);
+            padding-left: 10px;
+        }
+
+        .axis text { fill: var(--muted-gray); font-size: 10px; }
+        .axis path, .axis line { stroke: var(--border-gray); }
+
+        .line-movie { fill: none; stroke: var(--netflix-red); stroke-width: 2.5; }
+        .line-show { fill: none; stroke: #FFFFFF; stroke-width: 2; stroke-dasharray: 3,2; }
+        .hover-line { stroke: rgba(255, 255, 255, 0.4); stroke-width: 1.5px; stroke-dasharray: 4; }
+
+        /* Tooltip 樣式 - 參考 image_0e363d.png */
+        .tooltip {
+            position: absolute;
+            background: #000;
+            border: 1px solid #333;
+            padding: 8px 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 2000;
+            font-size: 14px;
+            color: #fff;
+            min-width: 110px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .tt-header { font-weight: bold; margin-bottom: 4px; font-size: 15px; letter-spacing: 0.5px;}
+        .tt-movie { color: var(--netflix-red); font-weight: bold; }
+        .tt-show { color: #fff; font-weight: bold; }
+
+        .slider-container {
+            width: 100%;
+            max-width: 800px;
+            margin: 30px 0;
+            text-align: center;
+        }
+        input[type=range] {
+            -webkit-appearance: none; width: 100%; background: transparent;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; background: var(--border-gray);
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%;
+            background: var(--netflix-red); cursor: pointer; margin-top: -7px;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="year-header">
+    <div id="year-display">2015</div>
+    <div class="legend">
+        <div style="display:flex; align-items:center; gap:5px;"><div style="width:15px; height:3px; background:var(--netflix-red);"></div> MOVIE</div>
+        <div style="display:flex; align-items:center; gap:5px;"><div style="width:15px; height:2px; border-top:2px dashed #FFF;"></div> SHOW</div>
+    </div>
+</div>
+
+<div id="charts-grid"></div>
+
+<div class="slider-container">
+    <input type="range" id="global-slider">
+    <p style="color:var(--muted-gray); font-size:11px; letter-spacing:1px; margin-top:10px;">SCRUB ANY CHART TO SYNC TIMELINE</p>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+
+<script>
+const margin = {top: 10, right: 10, bottom: 25, left: 35};
+const width = 380 - margin.left - margin.right;
+const height = 200 - margin.top - margin.bottom;
+
+const countries = ["US", "IN", "GB", "JP", "FR", "KR"];
+const chartRefs = {};
+const tooltip = d3.select("#tooltip");
+
+d3.csv("netflix_cleaned_categorized.csv").then(rawData => {
+    
+    // 1. 數據去重與過濾
+    const uniqueMap = new Map();
+    rawData.forEach(d => {
+        const score = +d.imdb_score;
+        const year = +d.release_year;
+        const country = d.country_clean;
+        const key = `${d.id}_${year}`;
+        if (countries.includes(country) && !uniqueMap.has(key) && !isNaN(score) && score > 0) {
+            uniqueMap.set(key, { year, type: d.type.toUpperCase(), country });
+        }
+    });
+    const cleanedData = Array.from(uniqueMap.values());
+
+    // 2. 比例尺設定
+    const yearExtent = d3.extent(cleanedData, d => d.year);
+    const x = d3.scaleLinear().domain(yearExtent).range([0, width]);
+    const slider = d3.select("#global-slider")
+        .attr("min", yearExtent[0]).attr("max", yearExtent[1]).attr("value", 2015);
+
+    // 3. 為每個國家建立圖表
+    countries.forEach(country => {
+        const countryData = cleanedData.filter(d => d.country === country);
+        const nested = d3.rollup(countryData, v => v.length, d => d.year, d => d.type);
+        const years = Array.from(nested.keys()).sort(d3.ascending);
+        
+        const plotData = years.map(y => ({
+            year: y,
+            MOVIE: nested.get(y).get("MOVIE") || 0,
+            SHOW: nested.get(y).get("SHOW") || 0
+        }));
+
+        const y = d3.scaleLinear().domain([0, d3.max(plotData, d => Math.max(d.MOVIE, d.SHOW))]).range([height, 0]);
+
+        const container = d3.select("#charts-grid").append("div").attr("class", "chart-cell");
+        container.append("div").attr("class", "country-label").text(country);
+        
+        const svg = container.append("svg")
+            .attr("viewBox", `0 0 380 200`)
+            .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+        svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x).ticks(5).tickFormat(d3.format("d")));
+        svg.append("g").attr("class", "axis").call(d3.axisLeft(y).ticks(4));
+
+        const lineM = d3.line().x(d => x(d.year)).y(d => y(d.MOVIE)).curve(d3.curveMonotoneX);
+        const lineS = d3.line().x(d => x(d.year)).y(d => y(d.SHOW)).curve(d3.curveMonotoneX);
+        svg.append("path").datum(plotData).attr("class", "line-movie").attr("d", lineM);
+        svg.append("path").datum(plotData).attr("class", "line-show").attr("d", lineS);
+
+        const vLine = svg.append("line").attr("class", "hover-line").attr("y1", 0).attr("y2", height).style("display", "none");
+        const dotM = svg.append("circle").attr("r", 4).attr("fill", "var(--netflix-red)").style("display", "none");
+        const dotS = svg.append("circle").attr("r", 4).attr("fill", "#FFFFFF").style("display", "none");
+
+        chartRefs[country] = { vLine, dotM, dotS, y, plotData };
+
+        // 互動事件
+        container.on("mousemove touchmove", function(event) {
+            const [mx] = d3.pointer(event);
+            const yr = Math.round(x.invert(mx - margin.left));
+            
+            if (yr >= yearExtent[0] && yr <= yearExtent[1]) {
+                syncUpdate(yr);
+                
+                // Tooltip 處理
+                const d = plotData.find(p => p.year === yr);
+                if (d) {
+                    tooltip.style("display", "block")
+                        .html(`
+                            <div class="tt-header">${yr} | ${country}</div>
+                            <div class="tt-movie">Movies: ${d.MOVIE}</div>
+                            <div class="tt-show">Shows: ${d.SHOW}</div>
+                        `)
+                        .style("left", (event.pageX + 15) + "px")
+                        .style("top", (event.pageY - 20) + "px");
+                }
+            }
+        });
+
+        container.on("mouseleave", function() {
+            tooltip.style("display", "none");
+        });
+    });
+
+    function syncUpdate(year) {
+        year = Math.round(year);
+        d3.select("#year-display").text(year);
+        slider.property("value", year);
+
+        countries.forEach(country => {
+            const ref = chartRefs[country];
+            const d = ref.plotData.find(p => p.year === year);
+            const posX = x(year);
+
+            if (d) {
+                ref.vLine.attr("x1", posX).attr("x2", posX).style("display", null);
+                ref.dotM.attr("cx", posX).attr("cy", ref.y(d.MOVIE)).style("display", null);
+                ref.dotS.attr("cx", posX).attr("cy", ref.y(d.SHOW)).style("display", null);
+            } else {
+                // 如果該年沒數據，隱藏指示器
+                ref.vLine.style("display", "none");
+                ref.dotM.style("display", "none");
+                ref.dotS.style("display", "none");
+            }
+        });
+    }
+
+    slider.on("input", function() { syncUpdate(+this.value); });
+    syncUpdate(2015);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --netflix-red: #E50914;
+            --netflix-dark: #141414;
+            --muted-gray: #B3B3B3;
+            --border-gray: #333333;
+        }
+
+        body {
+            background-color: var(--netflix-dark);
+            color: #FFFFFF;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+        }
+
+        #boxplot-container {
+            width: 100%;
+            max-width: 800px;
+            position: relative;
+        }
+
+        .chart-title {
+            color: #FFFFFF;
+            font-size: 22px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .axis path, .axis line { stroke: var(--border-gray); }
+        .axis text { fill: var(--muted-gray); font-size: 14px; }
+
+        .box { 
+            fill: var(--netflix-red); 
+            fill-opacity: 0.8; 
+            stroke: #FFFFFF; 
+            stroke-width: 2; 
+            cursor: pointer;
+        }
+        .whisker-line { stroke: #FFFFFF; stroke-width: 1.5; }
+        .whisker-cap { stroke: #FFFFFF; stroke-width: 1.5; }
+        .median-line { stroke: #FFFFFF; stroke-width: 3; }
+
+        /* Tooltip：緊貼盒子設計 */
+        .tooltip {
+            position: absolute;
+            background: rgba(20, 20, 20, 0.98);
+            border: 1px solid var(--border-gray);
+            padding: 12px 15px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            color: #FFFFFF;
+            font-size: 13px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            z-index: 100;
+        }
+
+        .tooltip-header {
+            font-weight: bold;
+            color: var(--netflix-red);
+            border-bottom: 1px solid var(--border-gray);
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+        }
+
+        .tooltip-row { display: flex; justify-content: space-between; gap: 30px; margin: 3px 0; }
+        .tooltip-label { color: var(--muted-gray); }
+        .tooltip-value { font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="boxplot-container">
+    <div class="chart-title">Global Score Distribution: Movie vs Show</div>
+    <div id="boxplot"></div>
+    <div id="boxplot-tooltip" class="tooltip"></div>
+</div>
+
+<script>
+const margin = {top: 20, right: 30, bottom: 50, left: 60};
+const width = 800 - margin.left - margin.right;
+const height = 450 - margin.top - margin.bottom;
+
+const svg = d3.select("#boxplot")
+    .append("svg")
+    .attr("viewBox", `0 0 800 450`)
+    .append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+const tooltip = d3.select("#boxplot-tooltip");
+
+d3.csv("netflix_cleaned_categorized.csv").then(rawData => {
+    
+    // 1. 資料清洗與去重 (Distinct Titles)
+    // 使用 Map 根據 ID 去重，確保每部電影/影集只計算一次
+    const uniqueMap = new Map();
+    rawData.forEach(d => {
+        const score = +d.imdb_score;
+        // 同時過濾掉無效的分數 (0 或 NaN)
+        if (!uniqueMap.has(d.id) && !isNaN(score) && score > 0) {
+            uniqueMap.set(d.id, {
+                type: d.type.toUpperCase(),
+                imdb_score: score
+            });
+        }
+    });
+
+    const cleanedData = Array.from(uniqueMap.values());
+
+    // 2. 計算統計數值
+    const boxData = d3.groups(cleanedData, d => d.type).map(([type, values]) => {
+        const scores = values.map(v => v.imdb_score).sort(d3.ascending);
+        const q1 = d3.quantile(scores, 0.25);
+        const median = d3.quantile(scores, 0.5);
+        const q3 = d3.quantile(scores, 0.75);
+        const min = scores[0];
+        const max = scores[scores.length - 1];
+        const count = values.length;
+        return { type, q1, median, q3, min, max, count };
+    });
+
+    // 3. 設定比例尺
+    const x = d3.scaleBand().domain(["MOVIE", "SHOW"]).range([0, width]).padding(0.6);
+    const y = d3.scaleLinear().domain([0, 10]).range([height, 0]);
+
+    // 4. 繪製座標軸
+    svg.append("g").attr("transform", `translate(0,${height})`).attr("class", "axis").call(d3.axisBottom(x));
+    svg.append("g").attr("class", "axis").call(d3.axisLeft(y).ticks(5));
+
+    // 5. 繪製盒鬚圖組件
+    const groups = svg.selectAll(".box-group").data(boxData).enter().append("g");
+
+    // 垂直鬚線與 T-Cap
+    groups.append("line")
+        .attr("class", "whisker-line")
+        .attr("x1", d => x(d.type) + x.bandwidth()/2)
+        .attr("x2", d => x(d.type) + x.bandwidth()/2)
+        .attr("y1", d => y(d.min)).attr("y2", d => y(d.max));
+
+    groups.append("line").attr("class", "whisker-cap")
+        .attr("x1", d => x(d.type) + x.bandwidth()*0.3).attr("x2", d => x(d.type) + x.bandwidth()*0.7)
+        .attr("y1", d => y(d.max)).attr("y2", d => y(d.max));
+
+    groups.append("line").attr("class", "whisker-cap")
+        .attr("x1", d => x(d.type) + x.bandwidth()*0.3).attr("x2", d => x(d.type) + x.bandwidth()*0.7)
+        .attr("y1", d => y(d.min)).attr("y2", d => y(d.min));
+
+    // 盒子主體
+    groups.append("rect")
+        .attr("class", "box")
+        .attr("x", d => x(d.type))
+        .attr("y", d => y(d.q3))
+        .attr("width", x.bandwidth())
+        .attr("height", d => y(d.q1) - y(d.q3))
+        .on("mouseover", function(event, d) {
+            d3.select(this).attr("fill-opacity", 1);
+            tooltip.style("display", "block")
+                .html(`
+                    <div class="tooltip-header">${d.type} (N=${d.count})</div>
+                    <div class="tooltip-row"><span class="tooltip-label">Max:</span> <span class="tooltip-value">${d.max.toFixed(1)}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-label">Q3 (75%):</span> <span class="tooltip-value">${d.q3.toFixed(1)}</span></div>
+                    <div class="tooltip-row" style="color:var(--netflix-red)"><span class="tooltip-label" style="color:var(--netflix-red)">Median:</span> <span class="tooltip-value">${d.median.toFixed(1)}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-label">Q1 (25%):</span> <span class="tooltip-value">${d.q1.toFixed(1)}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-label">Min:</span> <span class="tooltip-value">${d.min.toFixed(1)}</span></div>
+                `);
+        })
+        .on("mousemove", function(event, d) {
+            // 計算 Tooltip 位置：緊貼盒子的右側邊緣
+            const containerRect = document.getElementById("boxplot-container").getBoundingClientRect();
+            const boxRight = x(d.type) + x.bandwidth() + margin.left + 15;
+            const mouseTop = event.clientY - containerRect.top - 40;
+
+            tooltip.style("left", boxRight + "px")
+                   .style("top", mouseTop + "px");
+        })
+        .on("mouseleave", function() {
+            d3.select(this).attr("fill-opacity", 0.8);
+            tooltip.style("display", "none");
+        });
+
+    // 中位數線
+    groups.append("line")
+        .attr("class", "median-line")
+        .attr("x1", d => x(d.type)).attr("x2", d => x(d.type) + x.bandwidth())
+        .attr("y1", d => y(d.median)).attr("y2", d => y(d.median));
+});
+</script>
+</body>
+</html>

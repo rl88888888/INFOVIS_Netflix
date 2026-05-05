@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --netflix-red: #E50914;
+            --netflix-dark: #141414;
+            --muted-gray: #B3B3B3;
+            --border-gray: #333333;
+        }
+
+        body {
+            background-color: var(--netflix-dark);
+            color: #FFFFFF;
+            font-family: 'Inter', 'Montserrat', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 40px 20px;
+        }
+
+        #viz-wrapper {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .chart-title {
+            color: #FFFFFF; 
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .axis path, .axis line {
+            stroke: var(--border-gray);
+        }
+
+        .axis text {
+            fill: var(--muted-gray);
+        }
+
+        /* 線條樣式 */
+        .line-count { fill: none; stroke: var(--netflix-red); stroke-width: 3.5; }
+        .line-score { fill: none; stroke: #FFFFFF; stroke-width: 2.5; }
+
+        /* 互動元件 */
+        .slider-section {
+            width: 100%;
+            margin-top: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+
+        input[type=range] {
+            width: 100%;
+            accent-color: var(--netflix-red);
+            cursor: pointer;
+        }
+
+        /* 大年份數字：紅色 */
+        #year-display {
+            font-size: 64px;
+            font-weight: 900;
+            color: var(--netflix-red); 
+            margin-bottom: 10px;
+        }
+
+        /* 彈出方框 (Tooltip) */
+        .tooltip {
+            position: absolute;
+            background: rgba(20, 20, 20, 0.98);
+            border: 1px solid var(--border-gray);
+            padding: 15px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+            z-index: 10;
+            color: #FFFFFF;
+        }
+
+        .tooltip-year { 
+            font-size: 16px; 
+            font-weight: bold; 
+            margin-bottom: 8px; 
+            border-bottom: 1px solid var(--border-gray); 
+            padding-bottom: 5px;
+            color: #FFFFFF;
+        }
+
+        .tooltip-item { 
+            font-size: 14px; 
+            margin: 4px 0; 
+            display: flex; 
+            justify-content: space-between; 
+            gap: 25px; 
+            color: #FFFFFF;
+        }
+
+        .val-count, .val-score { 
+            color: #FFFFFF !important; 
+            font-weight: bold; 
+        }
+
+        /* 垂直對齊線 */
+        .hover-line { stroke: var(--border-gray); stroke-width: 1px; stroke-dasharray: 4; }
+    </style>
+</head>
+<body>
+
+<div id="viz-wrapper">
+    <div id="year-display">----</div>
+
+    <div class="chart-block">
+        <div class="chart-title">Content Volume (ID Count)</div>
+        <div id="count-chart"></div>
+    </div>
+
+    <div class="chart-block">
+        <div class="chart-title">Quality Trend (Median IMDb Score)</div>
+        <div id="score-chart"></div>
+    </div>
+
+    <div class="slider-section">
+        <input type="range" id="year-slider" value="2015">
+        <div style="color: var(--muted-gray); font-size: 13px; letter-spacing: 2px;">SCRUB TO EXPLORE TIMELINE</div>
+    </div>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+
+<script>
+const margin = {top: 20, right: 30, bottom: 30, left: 50};
+const width = 900 - margin.left - margin.right;
+const height = 220 - margin.top - margin.bottom;
+
+const svgCount = createSVG("#count-chart");
+const svgScore = createSVG("#score-chart");
+
+function createSVG(selector) {
+    return d3.select(selector)
+        .append("svg")
+        .attr("viewBox", `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+        .append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+}
+
+d3.csv("netflix_cleaned_categorized.csv").then(data => {
+    data.forEach(d => {
+        d.release_year = +d.release_year;
+        d.imdb_score = +d.imdb_score;
+    });
+
+    // 聚合數據
+    const yearlyStats = d3.rollups(data, v => ({
+        count: v.length,
+        medianScore: d3.median(v, d => d.imdb_score)
+    }), d => d.release_year)
+    .sort((a, b) => a[0] - b[0])
+    .map(([year, stats]) => ({year, ...stats}));
+
+    // 動態設定時間軸範圍
+    const yearExtent = d3.extent(yearlyStats, d => d.year);
+    const slider = d3.select("#year-slider");
+    slider.attr("min", yearExtent[0])
+          .attr("max", yearExtent[1])
+          .attr("value", Math.min(2015, yearExtent[1])); // 預設 2015，若資料不到 2015 則選最大值
+
+    // Scales
+    const x = d3.scaleLinear().domain(yearExtent).range([0, width]);
+    const yCount = d3.scaleLinear().domain([0, d3.max(yearlyStats, d => d.count)]).range([height, 0]);
+    const yScore = d3.scaleLinear().domain([0, 10]).range([height, 0]);
+
+    // 繪製座標軸
+    svgCount.append("g").attr("class", "axis").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x).tickFormat(d3.format("d")));
+    svgCount.append("g").attr("class", "axis").call(d3.axisLeft(yCount).ticks(5));
+    svgScore.append("g").attr("class", "axis").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x).tickFormat(d3.format("d")));
+    svgScore.append("g").attr("class", "axis").call(d3.axisLeft(yScore).ticks(5));
+
+    // 繪製線條
+    const lineC = d3.line().x(d => x(d.year)).y(d => yCount(d.count)).curve(d3.curveMonotoneX);
+    const lineS = d3.line().x(d => x(d.year)).y(d => yScore(d.medianScore)).curve(d3.curveMonotoneX);
+
+    svgCount.append("path").datum(yearlyStats).attr("class", "line-count").attr("d", lineC);
+    svgScore.append("path").datum(yearlyStats).attr("class", "line-score").attr("d", lineS);
+
+    // 指示元件
+    const vLine1 = svgCount.append("line").attr("class", "hover-line").attr("y1", 0).attr("y2", height).style("display", "none");
+    const vLine2 = svgScore.append("line").attr("class", "hover-line").attr("y1", 0).attr("y2", height).style("display", "none");
+    const focusC = svgCount.append("circle").attr("r", 6).attr("fill", "var(--netflix-red)").style("display", "none");
+    const focusS = svgScore.append("circle").attr("r", 6).attr("fill", "#FFFFFF").style("display", "none");
+
+    const tooltip = d3.select("#tooltip");
+
+    slider.on("input", function() {
+        updateVisuals(+this.value);
+    });
+
+    function updateVisuals(year) {
+        const d = yearlyStats.find(s => s.year === year);
+        d3.select("#year-display").text(year);
+
+        if (d) {
+            const posX = x(d.year);
+            vLine1.attr("x1", posX).attr("x2", posX).style("display", null);
+            vLine2.attr("x1", posX).attr("x2", posX).style("display", null);
+            focusC.attr("cx", posX).attr("cy", yCount(d.count)).style("display", null);
+            focusS.attr("cx", posX).attr("cy", yScore(d.medianScore)).style("display", null);
+
+            tooltip.style("display", "block")
+                .html(`
+                    <div class="tooltip-year">Year: ${d.year}</div>
+                    <div class="tooltip-item"><span>Titles:</span> <span class="val-count">${d.count}</span></div>
+                    <div class="tooltip-item"><span>Median Score:</span> <span class="val-score">${d.medianScore.toFixed(1)}</span></div>
+                `);
+
+            const rect = document.getElementById("count-chart").getBoundingClientRect();
+            tooltip.style("left", (posX + rect.left + 50) + "px")
+                   .style("top", (yCount(d.count) + rect.top - 20) + "px");
+        }
+    }
+    
+    // 初始化
+    updateVisuals(+slider.property("value"));
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --netflix-red: #E50914;
+            --netflix-dark: #141414;
+            --muted-gray: #B3B3B3;
+            --border-gray: #333333;
+        }
+
+        body {
+            background-color: var(--netflix-dark);
+            color: #FFFFFF;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+            margin: 0;
+        }
+
+        #viz-wrapper {
+            width: 100%;
+            max-width: 950px;
+            position: relative;
+        }
+
+        /* 標題與選擇器區塊 */
+        .controls-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            width: 100%;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-gray);
+            padding-bottom: 15px;
+        }
+
+        #year-display {
+            font-size: 80px;
+            font-weight: 900;
+            color: var(--netflix-red);
+            line-height: 0.8;
+            letter-spacing: -3px;
+        }
+
+        /* Netflix 風格下拉選單 */
+        select {
+            background-color: #000;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 8px 15px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+
+        .chart-container {
+            width: 100%;
+            background-color: #111;
+            padding: 20px;
+            border-radius: 4px;
+            cursor: ew-resize;
+        }
+
+        /* 線條樣式 */
+        .line-movie { fill: none; stroke: var(--netflix-red); stroke-width: 4; }
+        .line-show { fill: none; stroke: #FFFFFF; stroke-width: 3; stroke-dasharray: 4,2; }
+        .area-movie { fill: var(--netflix-red); fill-opacity: 0.1; }
+        .area-show { fill: #FFFFFF; fill-opacity: 0.05; }
+        
+        .axis text { fill: var(--muted-gray); font-size: 12px; }
+        .axis path, .axis line { stroke: var(--border-gray); }
+        .hover-line { stroke: rgba(255, 255, 255, 0.2); stroke-width: 1px; stroke-dasharray: 4; }
+
+        /* 圖例 */
+        .legend { display: flex; gap: 30px; margin-top: 10px; font-size: 12px; font-weight: bold; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+
+        /* Slider 樣式 */
+        .slider-section { width: 100%; margin-top: 30px; text-align: center; }
+        input[type=range] {
+            -webkit-appearance: none; width: 100%; background: transparent;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; background: var(--border-gray);
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%;
+            background: var(--netflix-red); cursor: pointer; margin-top: -8px;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid var(--border-gray);
+            padding: 12px;
+            pointer-events: none;
+            display: none;
+            color: white;
+            z-index: 100;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="viz-wrapper">
+    <div class="controls-header">
+        <div>
+            <div style="font-size: 14px; color: var(--muted-gray); letter-spacing: 2px; margin-bottom: 5px;">ANNUAL PRODUCTION</div>
+            <div id="year-display">2015</div>
+        </div>
+        <div>
+            <label style="font-size: 11px; color: var(--muted-gray); display: block; margin-bottom: 5px;">SELECT REGION</label>
+            <select id="country-select">
+                <option value="US">United States (US)</option>
+                <option value="IN">India (IN)</option>
+                <option value="GB">United Kingdom (GB)</option>
+                <option value="JP">Japan (JP)</option>
+                <option value="FR">France (FR)</option>
+                <option value="KR">South Korea (KR)</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div style="width:20px; height:4px; background:var(--netflix-red);"></div> MOVIES</div>
+        <div class="legend-item"><div style="width:20px; height:2px; border-top:2px dashed #FFFFFF;"></div> SHOWS</div>
+    </div>
+
+    <div class="chart-container" id="chart"></div>
+
+    <div class="slider-section">
+        <input type="range" id="year-slider">
+        <p style="color: var(--muted-gray); font-size: 11px; letter-spacing: 2px; margin-top: 15px;">SCRUB CHART TO EXPLORE TIMELINE</p>
+    </div>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+
+<script>
+const margin = {top: 30, right: 40, bottom: 40, left: 60};
+const width = 950 - margin.left - margin.right;
+const height = 450 - margin.top - margin.bottom;
+
+const svg = d3.select("#chart").append("svg")
+    .attr("viewBox", `0 0 950 450`)
+    .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+const tooltip = d3.select("#tooltip");
+
+d3.csv("netflix_cleaned_categorized.csv").then(rawData => {
+    
+    // 1. 全域資料清理 (Distinct + Score > 0)
+    const uniqueMap = new Map();
+    rawData.forEach(d => {
+        const score = +d.imdb_score;
+        const year = +d.release_year;
+        const country = d.country_clean || "Unknown";
+        const key = `${d.id}_${year}`;
+        if (!uniqueMap.has(key) && !isNaN(score) && score > 0) {
+            uniqueMap.set(key, { year, type: d.type.toUpperCase(), country });
+        }
+    });
+    const cleanedData = Array.from(uniqueMap.values());
+
+    // 2. 初始化比例尺
+    const yearExtent = d3.extent(cleanedData, d => d.year);
+    const x = d3.scaleLinear().domain(yearExtent).range([0, width]);
+    const y = d3.scaleLinear().range([height, 0]);
+
+    const xAxis = svg.append("g").attr("transform", `translate(0,${height})`).attr("class", "axis");
+    const yAxis = svg.append("g").attr("class", "axis");
+
+    // 3. 線條生成器
+    const lineM = d3.line().x(d => x(d.year)).y(d => y(d.MOVIE)).curve(d3.curveMonotoneX);
+    const lineS = d3.line().x(d => x(d.year)).y(d => y(d.SHOW)).curve(d3.curveMonotoneX);
+    const areaM = d3.area().x(d => x(d.year)).y0(height).y1(d => y(d.MOVIE)).curve(d3.curveMonotoneX);
+    const areaS = d3.area().x(d => x(d.year)).y0(height).y1(d => y(d.SHOW)).curve(d3.curveMonotoneX);
+
+    const pathAM = svg.append("path").attr("class", "area-movie");
+    const pathAS = svg.append("path").attr("class", "area-show");
+    const pathLM = svg.append("path").attr("class", "line-movie");
+    const pathLS = svg.append("path").attr("class", "line-show");
+
+    // 互動指標
+    const vLine = svg.append("line").attr("class", "hover-line").attr("y1", 0).attr("y2", height).style("display", "none");
+    const dotM = svg.append("circle").attr("r", 6).attr("fill", "var(--netflix-red)").style("display", "none");
+    const dotS = svg.append("circle").attr("r", 6).attr("fill", "#FFFFFF").style("display", "none");
+
+    let currentCountryData = [];
+
+    // 4. 更新函數：根據國家變更
+    function updateCountry(countryCode) {
+        const filtered = cleanedData.filter(d => d.country === countryCode);
+        const nested = d3.rollup(filtered, v => v.length, d => d.year, d => d.type);
+        const years = Array.from(nested.keys()).sort(d3.ascending);
+
+        currentCountryData = years.map(yr => ({
+            year: yr,
+            MOVIE: nested.get(yr).get("MOVIE") || 0,
+            SHOW: nested.get(yr).get("SHOW") || 0
+        }));
+
+        y.domain([0, d3.max(currentCountryData, d => Math.max(d.MOVIE, d.SHOW)) * 1.1]);
+
+        xAxis.call(d3.axisBottom(x).tickFormat(d3.format("d")));
+        yAxis.transition().duration(500).call(d3.axisLeft(y).ticks(6));
+
+        pathAM.datum(currentCountryData).transition().duration(500).attr("d", areaM);
+        pathAS.datum(currentCountryData).transition().duration(500).attr("d", areaS);
+        pathLM.datum(currentCountryData).transition().duration(500).attr("d", lineM);
+        pathLS.datum(currentCountryData).transition().duration(500).attr("d", lineS);
+    }
+
+    // 5. 更新函數：根據時間軸拉動
+    function updateYear(year) {
+        year = Math.round(year);
+        const d = currentCountryData.find(p => p.year === year);
+        d3.select("#year-display").text(year);
+        d3.select("#year-slider").property("value", year);
+
+        if (d) {
+            const posX = x(year);
+            vLine.attr("x1", posX).attr("x2", posX).style("display", null);
+            dotM.attr("cx", posX).attr("cy", y(d.MOVIE)).style("display", null);
+            dotS.attr("cx", posX).attr("cy", y(d.SHOW)).style("display", null);
+
+            tooltip.style("display", "block")
+                .html(`<strong>${year} | ${d3.select("#country-select").node().value}</strong><br>
+                       <span style="color:var(--netflix-red)">Movies: ${d.MOVIE}</span><br>
+                       <span>Shows: ${d.SHOW}</span>`)
+                .style("left", (event.pageX + 20) + "px").style("top", (event.pageY - 40) + "px");
+        }
+    }
+
+    // 6. 事件綁定
+    d3.select("#country-select").on("change", function() {
+        updateCountry(this.value);
+        updateYear(+d3.select("#year-slider").property("value"));
+    });
+
+    d3.select("#year-slider")
+        .attr("min", yearExtent[0]).attr("max", yearExtent[1]).attr("value", 2015)
+        .on("input", function() { updateYear(+this.value); });
+
+    d3.select("#chart").on("mousemove touchmove", function(event) {
+        const [mx] = d3.pointer(event);
+        const year = x.invert(mx - margin.left);
+        if (year >= yearExtent[0] && year <= yearExtent[1]) updateYear(year);
+    });
+
+    // 初始化
+    updateCountry("US");
+    updateYear(2015);
+});
+</script>
+</body>
+</html>
