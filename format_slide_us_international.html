@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&family=Lato:wght@300;400;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --netflix-red: #E50914;
+            --netflix-dark: #141414;
+            --muted-gray: #B3B3B3;
+            --border-gray: #333333;
+            --card-bg: #1c1c1c;
+        }
+
+        body {
+            background-color: #000000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Lato', sans-serif;
+        }
+
+        /* 16:9 簡報投影片容器 */
+        .slide-container {
+            width: 1280px;
+            height: 720px;
+            background-color: var(--netflix-dark);
+            color: #ffffff;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            padding: 50px 70px;
+            box-sizing: border-box;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+            overflow: hidden;
+        }
+
+        /* 簡報標題區塊 */
+        .slide-header {
+            margin-bottom: 30px;
+        }
+
+        .part-number {
+            color: var(--netflix-red);
+            font-size: 16px;
+            font-weight: 700;
+            font-family: 'Poppins', sans-serif;
+            letter-spacing: 2px;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+
+        .slide-title {
+            font-size: 42px;
+            font-weight: 700;
+            font-family: 'Poppins', sans-serif;
+            margin: 0 0 10px 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .slide-subtitle {
+            color: var(--muted-gray);
+            font-size: 16px;
+            letter-spacing: 0.5px;
+        }
+
+        /* 左右並排的圖表區塊 */
+        .charts-wrapper {
+            display: flex;
+            gap: 40px;
+            flex-grow: 1;
+            height: 100%;
+        }
+
+        .chart-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .section-header {
+            font-size: 18px;
+            font-weight: 700;
+            font-family: 'Poppins', sans-serif;
+            margin-bottom: 15px;
+            color: #fff;
+            border-left: 4px solid var(--netflix-red);
+            padding-left: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* 互動比較容器 */
+        .comparison-container {
+            flex-grow: 1;
+            position: relative;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border-gray);
+            overflow: hidden;
+            cursor: ew-resize;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .chart-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .movie-layer {
+            z-index: 1;
+        }
+
+        .show-layer {
+            z-index: 2;
+            clip-path: inset(0 0 0 50%);
+            border-left: 2px solid var(--muted-gray);
+        }
+
+        /* 滑動拉桿與跟隨方塊 (移除所有紅色陰影，統一為灰色) */
+        .slider-handle {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: 2px;
+            background: var(--muted-gray);
+            z-index: 10;
+            pointer-events: none;
+            transform: translateX(-50%);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .slider-handle::after {
+            content: "↔";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--muted-gray);
+            color: #141414;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6);
+        }
+
+        /* 即時資訊方塊 */
+        .info-box {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid var(--border-gray);
+            padding: 10px 15px;
+            border-radius: 4px;
+            color: white;
+            z-index: 20;
+            pointer-events: none;
+            display: none;
+            text-align: center;
+            min-width: 100px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .info-year {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #FFF;
+            border-bottom: 1px solid #333;
+            padding-bottom: 3px;
+        }
+
+        .info-movie {
+            color: var(--netflix-red);
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 3px;
+        }
+
+        .info-show {
+            color: #FFFFFF;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        /* 浮動標籤 (Labels) */
+        .label-tag {
+            position: absolute;
+            top: 15px;
+            padding: 6px 12px;
+            background: rgba(20, 20, 20, 0.85);
+            font-weight: 700;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-radius: 4px;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .label-movie {
+            left: 15px;
+            color: var(--netflix-red);
+            border: 1px solid rgba(229, 9, 20, 0.3);
+        }
+
+        .label-show {
+            right: 15px;
+            color: #FFFFFF;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        /* D3 SVG 樣式 (統一為實線) */
+        svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .area-movie {
+            fill: var(--netflix-red);
+            fill-opacity: 0.15;
+        }
+
+        .line-movie {
+            fill: none;
+            stroke: var(--netflix-red);
+            stroke-width: 3;
+        }
+
+        .area-show {
+            fill: #FFFFFF;
+            fill-opacity: 0.08;
+        }
+
+        .line-show {
+            fill: none;
+            stroke: #FFFFFF;
+            stroke-width: 3;
+        }
+
+        .axis text {
+            fill: var(--muted-gray);
+            font-size: 11px;
+            font-family: 'Lato', sans-serif;
+        }
+
+        .axis path,
+        .axis line {
+            stroke: var(--border-gray);
+        }
+
+        .grid line {
+            stroke: var(--border-gray);
+            stroke-opacity: 0.3;
+            stroke-dasharray: 2, 2;
+        }
+
+        .grid path {
+            stroke-width: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="slide-container">
+
+        <div class="slide-header">
+            <div class="part-number">Strategic Expansion</div>
+            <h1 class="slide-title">The Content Pivot</h1>
+            <div class="slide-subtitle">Scrub the dividers left and right to compare Movie (Red) vs. Show (White) focus
+                across regions.</div>
+        </div>
+
+        <div class="charts-wrapper">
+            <div class="chart-section">
+                <div class="section-header">United States (US)</div>
+                <div id="us-container" class="comparison-container">
+                    <div class="label-tag label-movie">Movie Perspective</div>
+                    <div class="label-tag label-show">Show Perspective</div>
+                    <div class="chart-layer movie-layer"></div>
+                    <div class="chart-layer show-layer"></div>
+
+                    <div class="slider-handle">
+                        <div class="info-box">
+                            <div class="info-year">Year</div>
+                            <div class="info-movie">Movies: 0</div>
+                            <div class="info-show">Shows: 0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-section">
+                <div class="section-header">International (Non-US)</div>
+                <div id="intl-container" class="comparison-container">
+                    <div class="label-tag label-movie">Movie Perspective</div>
+                    <div class="label-tag label-show">Show Perspective</div>
+                    <div class="chart-layer movie-layer"></div>
+                    <div class="chart-layer show-layer"></div>
+
+                    <div class="slider-handle">
+                        <div class="info-box">
+                            <div class="info-year">Year</div>
+                            <div class="info-movie">Movies: 0</div>
+                            <div class="info-show">Shows: 0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const containerWidth = (1280 - 140 - 40) / 2;
+        const containerHeight = 720 - 100 - 100 - 40;
+        const margin = { top: 60, right: 20, bottom: 30, left: 45 };
+        const width = containerWidth - margin.left - margin.right;
+        const height = containerHeight - margin.top - margin.bottom;
+
+        d3.csv("netflix_cleaned_categorized.csv").then(rawData => {
+
+            const uniqueMapUS = new Map();
+            const uniqueMapIntl = new Map();
+            let minYear = Infinity;
+            let maxYear = -Infinity;
+
+            // 1. 去重與分區
+            rawData.forEach(d => {
+                const score = +d.imdb_score;
+                const year = +d.release_year;
+                const country = d.country_clean;
+                const key = `${d.id}_${year}`;
+
+                if (!isNaN(score) && score > 0) {
+                    if (year < minYear) minYear = year;
+                    if (year > maxYear) maxYear = year;
+
+                    const dataPoint = { year, type: d.type ? d.type.toUpperCase() : 'UNKNOWN' };
+                    if (country === 'US') {
+                        if (!uniqueMapUS.has(key)) uniqueMapUS.set(key, dataPoint);
+                    } else {
+                        if (!uniqueMapIntl.has(key)) uniqueMapIntl.set(key, dataPoint);
+                    }
+                }
+            });
+
+            const fullYears = d3.range(minYear, maxYear + 1);
+
+            function processData(mapData) {
+                const arrayData = Array.from(mapData.values());
+                const nestedData = d3.rollup(arrayData, v => v.length, d => d.year, d => d.type);
+
+                const movieData = fullYears.map(y => ({ year: y, count: (nestedData.get(y) && nestedData.get(y).get("MOVIE")) || 0 }));
+                const showData = fullYears.map(y => ({ year: y, count: (nestedData.get(y) && nestedData.get(y).get("SHOW")) || 0 }));
+
+                return { movieData, showData };
+            }
+
+            const usData = processData(uniqueMapUS);
+            const intlData = processData(uniqueMapIntl);
+
+            // 2. 共用全局比例尺
+            const x = d3.scaleLinear().domain([minYear, maxYear]).range([0, width]);
+
+            const allCounts = [
+                ...usData.movieData, ...usData.showData,
+                ...intlData.movieData, ...intlData.showData
+            ].map(d => d.count);
+            const globalMaxY = d3.max(allCounts);
+
+            const y = d3.scaleLinear().domain([0, globalMaxY]).range([height, 0]);
+
+            // 3. 模組化繪圖函數
+            function renderLayer(containerSelector, layerClass, data, colorClass) {
+                const layer = d3.select(containerSelector).select(layerClass);
+                layer.selectAll("*").remove();
+
+                const svg = layer.append("svg")
+                    .attr("viewBox", `0 0 ${containerWidth} ${containerHeight}`)
+                    .append("g")
+                    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+                svg.append("g")
+                    .attr("class", "grid")
+                    .call(d3.axisLeft(y).ticks(5).tickSize(-width).tickFormat(""));
+
+                svg.append("g")
+                    .attr("transform", `translate(0,${height})`)
+                    .attr("class", "axis")
+                    .call(d3.axisBottom(x).tickFormat(d3.format("d")).ticks(8));
+                svg.append("g")
+                    .attr("class", "axis")
+                    .call(d3.axisLeft(y).ticks(5));
+
+                const area = d3.area().x(d => x(d.year)).y0(height).y1(d => y(d.count)).curve(d3.curveMonotoneX);
+                const line = d3.line().x(d => x(d.year)).y(d => y(d.count)).curve(d3.curveMonotoneX);
+
+                svg.append("path").datum(data).attr("class", `area-${colorClass}`).attr("d", area);
+                svg.append("path").datum(data).attr("class", `line-${colorClass}`).attr("d", line);
+            }
+
+            // 執行繪製
+            renderLayer("#us-container", ".movie-layer", usData.movieData, "movie");
+            renderLayer("#us-container", ".show-layer", usData.showData, "show");
+
+            renderLayer("#intl-container", ".movie-layer", intlData.movieData, "movie");
+            renderLayer("#intl-container", ".show-layer", intlData.showData, "show");
+
+            // 4. 全局同步滑動邏輯
+            const containers = [
+                document.getElementById("us-container"),
+                document.getElementById("intl-container")
+            ];
+
+            const syncSliders = (e, sourceContainer) => {
+                const rect = sourceContainer.getBoundingClientRect();
+                let clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+                let xPos = clientX - rect.left;
+
+                xPos = Math.max(0, Math.min(xPos, rect.width));
+                const percentage = (xPos / rect.width) * 100;
+
+                let chartX = xPos - margin.left;
+                let currentYear = Math.round(x.invert(chartX));
+
+                if (fullYears.length > 0) {
+                    currentYear = Math.max(fullYears[0], Math.min(fullYears[fullYears.length - 1], currentYear));
+                }
+
+                // 同步更新兩個圖表
+                containers.forEach(container => {
+                    const showLayer = container.querySelector(".show-layer");
+                    const handle = container.querySelector(".slider-handle");
+                    const infoBox = container.querySelector(".info-box");
+
+                    showLayer.style.clipPath = `inset(0 0 0 ${percentage}%)`;
+                    handle.style.left = `${percentage}%`;
+
+                    // 根據圖表更新個別數據
+                    const dataSet = container.id === "us-container" ? usData : intlData;
+                    const mCount = dataSet.movieData.find(d => d.year === currentYear)?.count || 0;
+                    const sCount = dataSet.showData.find(d => d.year === currentYear)?.count || 0;
+
+                    infoBox.style.display = "block";
+                    infoBox.querySelector(".info-year").innerText = currentYear;
+                    infoBox.querySelector(".info-movie").innerText = `Movies: ${mCount}`;
+                    infoBox.querySelector(".info-show").innerText = `Shows: ${sCount}`;
+                });
+            };
+
+            const hideInfoBoxes = () => {
+                containers.forEach(container => {
+                    container.querySelector(".info-box").style.display = "none";
+                });
+            };
+
+            containers.forEach(container => {
+                container.addEventListener("mousemove", (e) => syncSliders(e, container));
+                container.addEventListener("touchmove", (e) => syncSliders(e, container));
+                container.addEventListener("mouseleave", hideInfoBoxes);
+            });
+
+        });
+    </script>
+</body>
+
+</html>

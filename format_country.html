@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --netflix-red: #E50914;
+            --netflix-dark: #141414;
+            --muted-gray: #B3B3B3;
+            --border-gray: #333333;
+        }
+
+        body {
+            background-color: var(--netflix-dark);
+            color: #FFFFFF;
+            font-family: 'Inter', 'Montserrat', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+        }
+
+        #chart-container {
+            width: 100%;
+            max-width: 800px;
+            background-color: #1c1c1c;
+            padding: 30px;
+            border-radius: 8px;
+            border: 1px solid var(--border-gray);
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 25px;
+        }
+
+        .chart-title {
+            font-size: 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 5px;
+            color: #FFFFFF;
+        }
+
+        .chart-subtitle {
+            font-size: 13px;
+            color: var(--muted-gray);
+            letter-spacing: 0.5px;
+        }
+
+        /* 圖例樣式 */
+        .legend {
+            display: flex;
+            gap: 15px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            font-size: 13px;
+            color: var(--muted-gray);
+            font-weight: bold;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            margin-right: 6px;
+        }
+
+        /* 坐標軸：僅保留類別名稱 */
+        .axis path,
+        .axis line {
+            display: none;
+        }
+
+        .axis text {
+            fill: #FFFFFF;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .bar {
+            cursor: pointer;
+        }
+
+        .total-label {
+            fill: #FFFFFF;
+            font-size: 15px;
+            font-weight: bold;
+        }
+
+        /* 區塊內部文字樣式微調，縮小字體以容納百分比 */
+        .segment-label {
+            fill: #FFFFFF;
+            font-size: 11px;
+            font-weight: bold;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="chart-container">
+        <div class="chart-header">
+            <div>
+                <div class="chart-title">Qualified Content Volume</div>
+                <div class="chart-subtitle">Distinct titles with valid IMDb scores (US vs International)</div>
+            </div>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: var(--netflix-red);"></div>US
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #555555;"></div>International
+                </div>
+            </div>
+        </div>
+
+        <div id="bar-chart"></div>
+    </div>
+
+    <script>
+        const margin = { top: 10, right: 100, bottom: 20, left: 100 };
+        const width = 800 - margin.left - margin.right;
+        const height = 200 - margin.top - margin.bottom;
+
+        const svg = d3.select("#bar-chart")
+            .append("svg")
+            .attr("viewBox", `0 0 800 200`)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        d3.csv("netflix_cleaned_categorized.csv").then(rawData => {
+
+            // 1. 統一數據邏輯：過濾 + 去重 + 區分地區
+            const uniqueMap = new Map();
+            rawData.forEach(d => {
+                const score = +d.imdb_score;
+                if (!uniqueMap.has(d.id) && !isNaN(score) && score > 0) {
+                    // 判斷是否為美國產出
+                    const region = (d.country_clean === 'US') ? 'US' : 'International';
+                    uniqueMap.set(d.id, {
+                        type: d.type ? d.type.toUpperCase() : 'UNKNOWN',
+                        region: region
+                    });
+                }
+            });
+
+            // 2. 分組計算 (依據 Type 與 Region)
+            const cleanedArray = Array.from(uniqueMap.values());
+            const counts = d3.rollup(cleanedArray, v => v.length, d => d.type, d => d.region);
+
+            const types = Array.from(counts.keys()); // ['MOVIE', 'SHOW']
+            const regions = ['US', 'International'];
+
+            // 3. 轉換為 d3.stack 能夠吃的資料格式
+            const data = types.map(type => {
+                const typeData = { type: type, total: 0 };
+                regions.forEach(region => {
+                    const count = counts.get(type)?.get(region) || 0;
+                    typeData[region] = count;
+                    typeData.total += count;
+                });
+                return typeData;
+            }).sort((a, b) => b.total - a.total); // 依總數排序
+
+            // 4. 設定比例尺
+            const y = d3.scaleBand()
+                .domain(data.map(d => d.type))
+                .range([0, height])
+                .padding(0.4);
+
+            const x = d3.scaleLinear()
+                .domain([0, d3.max(data, d => d.total)])
+                .range([0, width]);
+
+            // 設定顏色比例尺 (US = 紅色, Intl = 深灰色)
+            const color = d3.scaleOrdinal()
+                .domain(regions)
+                .range(["#E50914", "#555555"]);
+
+            // 5. 堆疊資料轉換
+            const stack = d3.stack().keys(regions);
+            const series = stack(data);
+
+            // 6. 繪製 Y 軸標籤
+            svg.append("g")
+                .attr("class", "axis")
+                .call(d3.axisLeft(y));
+
+            // 7. 繪製堆疊長條圖 (含動畫)
+            const groups = svg.selectAll("g.layer")
+                .data(series)
+                .enter().append("g")
+                .attr("class", "layer")
+                .attr("fill", d => color(d.key));
+
+            groups.selectAll("rect")
+                .data(d => d)
+                .enter().append("rect")
+                .attr("class", "bar")
+                .attr("y", d => y(d.data.type))
+                .attr("x", d => x(d[0]))
+                .attr("height", y.bandwidth())
+                .attr("width", 0) // 動畫起點
+                .transition()
+                .duration(1200)
+                .ease(d3.easeExpOut)
+                .attr("width", d => x(d[1]) - x(d[0]));
+
+            // 8. 加上區塊內部數字與百分比標籤 (動畫延遲顯示)
+            groups.selectAll("text.segment-label")
+                .data(d => d)
+                .enter().append("text")
+                .attr("class", "segment-label")
+                .attr("y", d => y(d.data.type) + y.bandwidth() / 2 + 4)
+                .attr("x", d => x(d[0]) + (x(d[1]) - x(d[0])) / 2) // 置中於區塊內
+                .attr("text-anchor", "middle")
+                .text(d => {
+                    const val = d[1] - d[0];
+                    const total = d.data.total;
+                    if (val > 0 && total > 0) {
+                        // 計算百分比並取小數點後一位
+                        const percentage = ((val / total) * 100).toFixed(1);
+                        // 組合顯示字串: "數量 (百分比%)"
+                        return `${val.toLocaleString()} (${percentage}%)`;
+                    }
+                    return ""; // 數值為 0 則不顯示
+                })
+                .style("opacity", 0)
+                .transition()
+                .delay(800)
+                .duration(600)
+                .style("opacity", 1);
+
+            // 9. 加上右側總數標籤 (動畫延遲顯示)
+            svg.selectAll(".total-label")
+                .data(data)
+                .enter()
+                .append("text")
+                .attr("class", "total-label")
+                .attr("y", d => y(d.type) + y.bandwidth() / 2 + 5)
+                .attr("x", d => x(d.total) + 15)
+                .text(d => d.total.toLocaleString())
+                .style("opacity", 0)
+                .transition()
+                .delay(800)
+                .duration(600)
+                .style("opacity", 1);
+        });
+    </script>
+
+</body>
+
+</html>

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -40,12 +41,15 @@
         }
 
         /* 背景層 (Movie) */
-        #movie-layer { z-index: 1; }
-        
+        #movie-layer {
+            z-index: 1;
+        }
+
         /* 前景層 (Show) */
         #show-layer {
             z-index: 2;
-            clip-path: inset(0 0 0 50%); /* 初始顯示一半 */
+            clip-path: inset(0 0 0 50%);
+            /* 初始顯示一半 */
             border-left: 2px solid #FFFFFF;
         }
 
@@ -77,124 +81,164 @@
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
         }
 
         .label-tag {
             position: absolute;
             top: 10px;
             padding: 5px 15px;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0, 0, 0, 0.7);
             font-weight: bold;
             text-transform: uppercase;
             font-size: 12px;
             pointer-events: none;
             z-index: 5;
         }
-        .label-movie { left: 20px; color: var(--netflix-red); }
-        .label-show { right: 20px; color: #FFFFFF; border: 1px solid #FFFFFF; }
 
-        svg { background: var(--netflix-dark); display: block; }
-        .area-movie { fill: var(--netflix-red); fill-opacity: 0.3; }
-        .line-movie { fill: none; stroke: var(--netflix-red); stroke-width: 4; }
-        .area-show { fill: #FFFFFF; fill-opacity: 0.2; }
-        .line-show { fill: none; stroke: #FFFFFF; stroke-width: 4; }
-        .axis text { fill: var(--muted-gray); font-size: 11px; }
-        .axis path, .axis line { stroke: var(--border-gray); }
+        .label-movie {
+            left: 20px;
+            color: var(--netflix-red);
+        }
+
+        .label-show {
+            right: 20px;
+            color: #FFFFFF;
+            border: 1px solid #FFFFFF;
+        }
+
+        svg {
+            background: var(--netflix-dark);
+            display: block;
+        }
+
+        .area-movie {
+            fill: var(--netflix-red);
+            fill-opacity: 0.3;
+        }
+
+        .line-movie {
+            fill: none;
+            stroke: var(--netflix-red);
+            stroke-width: 4;
+        }
+
+        .area-show {
+            fill: #FFFFFF;
+            fill-opacity: 0.2;
+        }
+
+        .line-show {
+            fill: none;
+            stroke: #FFFFFF;
+            stroke-width: 4;
+        }
+
+        .axis text {
+            fill: var(--muted-gray);
+            font-size: 11px;
+        }
+
+        .axis path,
+        .axis line {
+            stroke: var(--border-gray);
+        }
     </style>
 </head>
+
 <body>
 
-<div style="text-align: center; margin-bottom: 20px;">
-    <h2 style="margin: 0; letter-spacing: 2px;">THE CONTENT PIVOT</h2>
-    <p style="color: var(--muted-gray);">Slide to compare Movie (Red) vs. Show (White) Volume</p>
-</div>
+    <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="margin: 0; letter-spacing: 2px;">THE CONTENT PIVOT</h2>
+        <p style="color: var(--muted-gray);">Slide to compare Movie (Red) vs. Show (White) Volume</p>
+    </div>
 
-<div id="comparison-container">
-    <div class="label-tag label-movie">Movie Perspective</div>
-    <div class="label-tag label-show">Show Perspective</div>
+    <div id="comparison-container">
+        <div class="label-tag label-movie">Movie Perspective</div>
+        <div class="label-tag label-show">Show Perspective</div>
 
-    <div id="movie-layer" class="chart-layer"></div>
-    
-    <div id="show-layer" class="chart-layer"></div>
+        <div id="movie-layer" class="chart-layer"></div>
 
-    <div id="slider-handle"></div>
-</div>
+        <div id="show-layer" class="chart-layer"></div>
 
-<script>
-const margin = {top: 50, right: 30, bottom: 40, left: 60};
-const width = 900 - margin.left - margin.right;
-const height = 450 - margin.top - margin.bottom;
+        <div id="slider-handle"></div>
+    </div>
 
-// 設定容器高度
-d3.select("#comparison-container").style("height", (height + margin.top + margin.bottom) + "px");
+    <script>
+        const margin = { top: 50, right: 30, bottom: 40, left: 60 };
+        const width = 900 - margin.left - margin.right;
+        const height = 450 - margin.top - margin.bottom;
 
-d3.csv("netflix_cleaned_categorized.csv").then(rawData => {
-    
-    // 1. 數據去重與過濾
-    const uniqueMap = new Map();
-    rawData.forEach(d => {
-        const score = +d.imdb_score;
-        const year = +d.release_year;
-        const key = `${d.id}_${year}`;
-        if (!uniqueMap.has(key) && !isNaN(score) && score > 0) {
-            uniqueMap.set(key, { year, type: d.type.toUpperCase() });
-        }
-    });
+        // 設定容器高度
+        d3.select("#comparison-container").style("height", (height + margin.top + margin.bottom) + "px");
 
-    const cleanedData = Array.from(uniqueMap.values());
-    const nestedData = d3.rollup(cleanedData, v => v.length, d => d.year, d => d.type);
-    const years = Array.from(nestedData.keys()).sort(d3.ascending);
-    
-    const movieData = years.map(y => ({ year: y, count: nestedData.get(y).get("MOVIE") || 0 }));
-    const showData = years.map(y => ({ year: y, count: nestedData.get(y).get("SHOW") || 0 }));
+        d3.csv("netflix_cleaned_categorized.csv").then(rawData => {
 
-    // 2. 比例尺 (兩圖共用 X 與 Y，方便直觀比較)
-    const x = d3.scaleLinear().domain(d3.extent(years)).range([0, width]);
-    const yMax = d3.max([...movieData, ...showData], d => d.count);
-    const y = d3.scaleLinear().domain([0, yMax]).range([height, 0]);
+            // 1. 數據去重與過濾
+            const uniqueMap = new Map();
+            rawData.forEach(d => {
+                const score = +d.imdb_score;
+                const year = +d.release_year;
+                const key = `${d.id}_${year}`;
+                if (!uniqueMap.has(key) && !isNaN(score) && score > 0) {
+                    uniqueMap.set(key, { year, type: d.type.toUpperCase() });
+                }
+            });
 
-    // 3. 繪製函數
-    function render(selector, data, colorClass) {
-        const svg = d3.select(selector).append("svg")
-            .attr("width", 900).attr("height", height + margin.top + margin.bottom)
-            .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+            const cleanedData = Array.from(uniqueMap.values());
+            const nestedData = d3.rollup(cleanedData, v => v.length, d => d.year, d => d.type);
+            const years = Array.from(nestedData.keys()).sort(d3.ascending);
 
-        svg.append("g").attr("transform", `translate(0,${height})`).attr("class", "axis").call(d3.axisBottom(x).tickFormat(d3.format("d")));
-        svg.append("g").attr("class", "axis").call(d3.axisLeft(y).ticks(6));
+            const movieData = years.map(y => ({ year: y, count: nestedData.get(y).get("MOVIE") || 0 }));
+            const showData = years.map(y => ({ year: y, count: nestedData.get(y).get("SHOW") || 0 }));
 
-        const area = d3.area().x(d => x(d.year)).y0(height).y1(d => y(d.count)).curve(d3.curveMonotoneX);
-        const line = d3.line().x(d => x(d.year)).y(d => y(d.count)).curve(d3.curveMonotoneX);
+            // 2. 比例尺 (兩圖共用 X 與 Y，方便直觀比較)
+            const x = d3.scaleLinear().domain(d3.extent(years)).range([0, width]);
+            const yMax = d3.max([...movieData, ...showData], d => d.count);
+            const y = d3.scaleLinear().domain([0, yMax]).range([height, 0]);
 
-        svg.append("path").datum(data).attr("class", `area-${colorClass}`).attr("d", area);
-        svg.append("path").datum(data).attr("class", `line-${colorClass}`).attr("d", line);
-    }
+            // 3. 繪製函數
+            function render(selector, data, colorClass) {
+                const svg = d3.select(selector).append("svg")
+                    .attr("width", 900).attr("height", height + margin.top + margin.bottom)
+                    .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
-    render("#movie-layer", movieData, "movie");
-    render("#show-layer", showData, "show");
+                svg.append("g").attr("transform", `translate(0,${height})`).attr("class", "axis").call(d3.axisBottom(x).tickFormat(d3.format("d")));
+                svg.append("g").attr("class", "axis").call(d3.axisLeft(y).ticks(6));
 
-    // 4. 滑動互動邏輯
-    const container = document.getElementById("comparison-container");
-    const showLayer = document.getElementById("show-layer");
-    const handle = document.getElementById("slider-handle");
+                const area = d3.area().x(d => x(d.year)).y0(height).y1(d => y(d.count)).curve(d3.curveMonotoneX);
+                const line = d3.line().x(d => x(d.year)).y(d => y(d.count)).curve(d3.curveMonotoneX);
 
-    const moveSlider = (e) => {
-        const rect = container.getBoundingClientRect();
-        let xPos = (e.pageX || e.touches[0].pageX) - rect.left;
-        
-        // 限制在容器內
-        xPos = Math.max(0, Math.min(xPos, rect.width));
-        
-        const percentage = (xPos / rect.width) * 100;
-        
-        // 更新前景層的裁切與拉桿位置
-        showLayer.style.clipPath = `inset(0 0 0 ${percentage}%)`;
-        handle.style.left = `${percentage}%`;
-    };
+                svg.append("path").datum(data).attr("class", `area-${colorClass}`).attr("d", area);
+                svg.append("path").datum(data).attr("class", `line-${colorClass}`).attr("d", line);
+            }
 
-    container.addEventListener("mousemove", moveSlider);
-    container.addEventListener("touchmove", moveSlider);
-});
-</script>
+            render("#movie-layer", movieData, "movie");
+            render("#show-layer", showData, "show");
+
+            // 4. 滑動互動邏輯
+            const container = document.getElementById("comparison-container");
+            const showLayer = document.getElementById("show-layer");
+            const handle = document.getElementById("slider-handle");
+
+            const moveSlider = (e) => {
+                const rect = container.getBoundingClientRect();
+                let xPos = (e.pageX || e.touches[0].pageX) - rect.left;
+
+                // 限制在容器內
+                xPos = Math.max(0, Math.min(xPos, rect.width));
+
+                const percentage = (xPos / rect.width) * 100;
+
+                // 更新前景層的裁切與拉桿位置
+                showLayer.style.clipPath = `inset(0 0 0 ${percentage}%)`;
+                handle.style.left = `${percentage}%`;
+            };
+
+            container.addEventListener("mousemove", moveSlider);
+            container.addEventListener("touchmove", moveSlider);
+        });
+    </script>
 </body>
+
 </html>
